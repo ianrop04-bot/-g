@@ -147,7 +147,7 @@ footer a{
 
 </html>`)
 })
-const messages = {}
+const message = {}
 app.post('/user/new', async(req, res)=> {
   const {username , old ,bio,followurl} = req.body
   const sessonId = generate()
