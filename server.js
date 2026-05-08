@@ -1,13 +1,54 @@
 const express = require('express');
 const crypto = require('crypto');
+const fs = require('fs');
 
 const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Store profiles
-const profiles = {};
+// ==================== DATABASE ====================
+const DB_FILE = './database.json';
+
+function readDB() {
+    try {
+        if (!fs.existsSync(DB_FILE)) {
+            fs.writeFileSync(DB_FILE, JSON.stringify({ profiles: [] }));
+        }
+        return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    } catch (err) {
+        return { profiles: [] };
+    }
+}
+
+function writeDB(data) {
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+}
+
+function findProfile(id) {
+    const db = readDB();
+    return db.profiles.find(p => p.id === id);
+}
+
+function getAllProfiles() {
+    const db = readDB();
+    return db.profiles;
+}
+
+function saveProfile(profile) {
+    const db = readDB();
+    db.profiles.push(profile);
+    writeDB(db);
+}
+
+function incrementViews(id) {
+    const db = readDB();
+    const profile = db.profiles.find(p => p.id === id);
+    if (profile) {
+        profile.views = (profile.views || 0) + 1;
+        writeDB(db);
+    }
+}
 
 function generateId() {
     return crypto.randomBytes(4).toString('hex');
@@ -38,7 +79,7 @@ app.get('/', (req, res) => {
             border-radius:1.5rem;
             padding:2rem;
             width:100%;
-            max-width:460px;
+            max-width:480px;
             box-shadow:0 20px 40px rgba(0,0,0,0.3);
         }
         h1{text-align:center;color:#0f172a;margin-bottom:0.2rem;font-size:1.6rem}
@@ -102,12 +143,29 @@ app.get('/', (req, res) => {
             font-size:0.85rem;
         }
         .copied{background:#059669!important}
+        
+        .saved-list{
+            margin-top:1.5rem;
+            border-top:1px solid #e2e8f0;
+            padding-top:1rem;
+        }
+        .saved-list h3{color:#0f172a;font-size:0.95rem;margin-bottom:0.5rem}
+        .saved-item{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            padding:0.5rem 0;
+            border-bottom:1px solid #f1f5f9;
+            font-size:0.85rem;
+        }
+        .saved-item a{color:#3b82f6;text-decoration:none}
+        .saved-item span{color:#94a3b8;font-size:0.75rem}
     </style>
 </head>
 <body>
     <div class="card">
         <h1>🎨 Portfolio Maker</h1>
-        <p class="sub">Fill in your details & get a shareable portfolio link</p>
+        <p class="sub">Fill in your details & get a permanent portfolio link</p>
         
         <div class="form-group">
             <label>👤 Full Name *</label>
@@ -151,6 +209,11 @@ app.get('/', (req, res) => {
             <br>
             <button onclick="copyLink()" id="copyBtn">📋 Copy Link</button>
         </div>
+        
+        <div class="saved-list" id="savedList">
+            <h3>📜 Saved Portfolios</h3>
+            <div id="savedItems" style="color:#94a3b8;font-size:0.85rem;">Loading...</div>
+        </div>
     </div>
     
     <script>
@@ -168,6 +231,31 @@ app.get('/', (req, res) => {
                 selectedColor = e.target.getAttribute('data-color');
             }
         };
+        
+        // Load saved profiles
+        loadSavedProfiles();
+        
+        function loadSavedProfiles() {
+            fetch('/api/profiles')
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                var list = document.getElementById('savedItems');
+                if (data.profiles.length === 0) {
+                    list.innerHTML = 'No portfolios yet. Create one!';
+                    return;
+                }
+                
+                var html = '';
+                for (var i = 0; i < data.profiles.length; i++) {
+                    var p = data.profiles[i];
+                    html += '<div class="saved-item">' +
+                        '<a href="/p/' + p.id + '" target="_blank">' + p.name + '</a>' +
+                        '<span>👁 ' + p.views + ' views</span>' +
+                    '</div>';
+                }
+                list.innerHTML = html;
+            });
+        }
         
         function createPortfolio() {
             var name = document.getElementById('nameInput').value.trim();
@@ -209,6 +297,9 @@ app.get('/', (req, res) => {
                     document.getElementById('ageInput').value = '';
                     document.getElementById('bioInput').value = '';
                     document.getElementById('urlInput').value = '';
+                    
+                    // Refresh saved list
+                    loadSavedProfiles();
                 } else {
                     alert('Error: ' + data.error);
                 }
@@ -239,7 +330,7 @@ app.get('/', (req, res) => {
     `);
 });
 
-// ==================== CREATE PORTFOLIO ====================
+// ==================== API: CREATE PORTFOLIO ====================
 app.post('/create', (req, res) => {
     const { name, age, bio, url, color } = req.body;
     
@@ -249,7 +340,7 @@ app.post('/create', (req, res) => {
     
     const id = generateId();
     
-    profiles[id] = {
+    const profile = {
         id,
         name: name.trim(),
         age: age || '',
@@ -260,17 +351,42 @@ app.post('/create', (req, res) => {
         views: 0
     };
     
+    // Save to database
+    saveProfile(profile);
+    
     const portfolioUrl = `${req.protocol}://${req.get('host')}/p/${id}`;
     
-    console.log('✅ Portfolio created:', portfolioUrl);
+    console.log('✅ Portfolio saved:', portfolioUrl);
     
     res.json({ success: true, url: portfolioUrl, id });
 });
 
-// ==================== VIEW PORTFOLIO ====================
+// ==================== API: GET ALL PROFILES ====================
+app.get('/api/profiles', (req, res) => {
+    const profiles = getAllProfiles();
+    // Return last 10, newest first
+    const sorted = profiles
+        .sort((a, b) => new Date(b.created) - new Date(a.created))
+        .slice(0, 10);
+    
+    res.json({ success: true, profiles: sorted });
+});
+
+// ==================== API: GET SINGLE PROFILE ====================
+app.get('/api/profile/:id', (req, res) => {
+    const profile = findProfile(req.params.id);
+    
+    if (!profile) {
+        return res.json({ success: false, error: 'Profile not found' });
+    }
+    
+    res.json({ success: true, profile });
+});
+
+// ==================== VIEW PORTFOLIO PAGE ====================
 app.get('/p/:id', (req, res) => {
     const { id } = req.params;
-    const profile = profiles[id];
+    const profile = findProfile(id);
     
     if (!profile) {
         return res.send(`
@@ -304,7 +420,9 @@ app.get('/p/:id', (req, res) => {
         `);
     }
     
-    profiles[id].views++;
+    // Increment views in database
+    incrementViews(id);
+    const updatedProfile = findProfile(id);
     
     const initial = profile.name.charAt(0).toUpperCase();
     
@@ -418,7 +536,7 @@ app.get('/p/:id', (req, res) => {
             ${profile.age ? '<div class="age">🎂 ' + profile.age + ' years old</div>' : ''}
             ${profile.bio ? '<p class="bio">' + profile.bio + '</p>' : ''}
             ${profile.url ? '<a class="follow-btn" href="' + profile.url + '" target="_blank">🔗 Follow Me</a>' : ''}
-            <div class="views">👁️ ${profile.views} views</div>
+            <div class="views">👁️ ${updatedProfile.views} views</div>
             <a class="create-link" href="/">⚡ Create Your Portfolio</a>
         </div>
     </body>
@@ -430,4 +548,5 @@ app.get('/p/:id', (req, res) => {
 const PORT = process.env.PORT || 3230;
 app.listen(PORT, () => {
     console.log('🎨 Portfolio Maker running on port ' + PORT);
+    console.log('💾 Database: ' + DB_FILE);
 });
