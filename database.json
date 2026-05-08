@@ -1,0 +1,14 @@
+{
+  "profiles": [
+    {
+      "id": "a1b2c3d4",
+      "name": "John Doe",
+      "age": "25",
+      "bio": "Web Developer",
+      "url": "https://instagram.com/john",
+      "color": "#3b82f6",
+      "created": "2024-01-01T00:00:00.000Z",
+      "views": 15
+    }
+  ]
+}
