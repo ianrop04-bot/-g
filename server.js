@@ -84,6 +84,9 @@ app.get('/', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    	<meta property="og:image" content="https://n.uguu.se/ouOBJqvG.jpg" />
+	<meta property="og:description" content="A free portfolio maker made by 『𝐍𝐄𝐗𝐅𝐆𝐄𝐍』◆『𝐇𝐔𝐁』 Teams">
+
     <title>Portfolio Maker</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
