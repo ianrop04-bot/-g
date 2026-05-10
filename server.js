@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 
 const app = express();
 
@@ -8,21 +9,32 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ==================== DATABASE ====================
-const DB_FILE = './database.json';
+const DB_FILE = path.join(__dirname, 'database.json');
+
+if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, JSON.stringify({ profiles: [] }, null, 2));
+}
 
 function readDB() {
     try {
-        if (!fs.existsSync(DB_FILE)) {
-            fs.writeFileSync(DB_FILE, JSON.stringify({ profiles: [] }));
-        }
-        return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+        const raw = fs.readFileSync(DB_FILE, 'utf8');
+        const data = JSON.parse(raw);
+        if (!data.profiles) data.profiles = [];
+        return data;
     } catch (err) {
         return { profiles: [] };
     }
 }
 
 function writeDB(data) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+    try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+        console.log('💾 Saved. Total:', data.profiles.length);
+        return true;
+    } catch (err) {
+        console.error('Write error:', err.message);
+        return false;
+    }
 }
 
 function findProfile(id) {
@@ -32,13 +44,20 @@ function findProfile(id) {
 
 function getAllProfiles() {
     const db = readDB();
-    return db.profiles;
+    return db.profiles || [];
 }
 
 function saveProfile(profile) {
     const db = readDB();
-    db.profiles.push(profile);
-    writeDB(db);
+    const existingIndex = db.profiles.findIndex(p => p.id === profile.id);
+    
+    if (existingIndex >= 0) {
+        db.profiles[existingIndex] = profile;
+    } else {
+        db.profiles.push(profile);
+    }
+    
+    return writeDB(db);
 }
 
 function incrementViews(id) {
@@ -56,6 +75,9 @@ function generateId() {
 
 // ==================== HOME PAGE ====================
 app.get('/', (req, res) => {
+    const db = readDB();
+    const profileCount = db.profiles.length;
+    
     res.send(`
 <!DOCTYPE html>
 <html lang="en">
@@ -79,11 +101,25 @@ app.get('/', (req, res) => {
             border-radius:1.5rem;
             padding:2rem;
             width:100%;
-            max-width:480px;
+            max-width:500px;
             box-shadow:0 20px 40px rgba(0,0,0,0.3);
+            max-height:90vh;
+            overflow-y:auto;
         }
         h1{text-align:center;color:#0f172a;margin-bottom:0.2rem;font-size:1.6rem}
-        .sub{text-align:center;color:#64748b;font-size:0.85rem;margin-bottom:1.5rem}
+        .sub{text-align:center;color:#64748b;font-size:0.85rem;margin-bottom:1rem}
+        .badge{
+            text-align:center;
+            margin-bottom:1rem;
+        }
+        .badge span{
+            background:#dbeafe;
+            color:#1e40af;
+            padding:0.3rem 0.8rem;
+            border-radius:1rem;
+            font-size:0.8rem;
+            font-weight:600;
+        }
         
         .form-group{margin-bottom:1rem}
         label{display:block;font-weight:600;color:#0f172a;margin-bottom:0.3rem;font-size:0.85rem}
@@ -100,13 +136,24 @@ app.get('/', (req, res) => {
         input:focus,textarea:focus{border-color:#3b82f6}
         textarea{min-height:80px;resize:vertical}
         
-        .color-picker{display:flex;gap:0.5rem;flex-wrap:wrap}
-        .color-dot{
-            width:35px;height:35px;border-radius:50%;cursor:pointer;
-            border:3px solid transparent;transition:0.2s;
+        input[type="color"]{
+            width:60px;
+            height:45px;
+            padding:3px;
+            cursor:pointer;
+            border-radius:0.6rem;
         }
-        .color-dot:hover{transform:scale(1.1)}
-        .color-dot.active{border-color:#0f172a}
+        .color-row{
+            display:flex;
+            align-items:center;
+            gap:0.8rem;
+        }
+        .color-preview{
+            width:40px;height:40px;
+            border-radius:50%;
+            border:3px solid #e2e8f0;
+            transition:0.3s;
+        }
         
         button{
             width:100%;
@@ -119,7 +166,7 @@ app.get('/', (req, res) => {
             font-weight:600;
             cursor:pointer;
             font-family:inherit;
-            margin-top:1rem;
+            margin-top:0.5rem;
             transition:0.3s;
         }
         button:hover{background:#2563eb;transform:translateY(-1px)}
@@ -165,7 +212,11 @@ app.get('/', (req, res) => {
 <body>
     <div class="card">
         <h1>🎨 Portfolio Maker</h1>
-        <p class="sub">Fill in your details & get a permanent portfolio link</p>
+        <p class="sub">Create your profile & get a permanent link</p>
+        
+        <div class="badge">
+            <span>📁 ${profileCount} portfolios created</span>
+        </div>
         
         <div class="form-group">
             <label>👤 Full Name *</label>
@@ -189,15 +240,10 @@ app.get('/', (req, res) => {
         
         <div class="form-group">
             <label>🎨 Avatar Color</label>
-            <div class="color-picker" id="colorPicker">
-                <div class="color-dot active" style="background:#3b82f6" data-color="#3b82f6"></div>
-                <div class="color-dot" style="background:#8b5cf6" data-color="#8b5cf6"></div>
-                <div class="color-dot" style="background:#ec4899" data-color="#ec4899"></div>
-                <div class="color-dot" style="background:#ef4444" data-color="#ef4444"></div>
-                <div class="color-dot" style="background:#f59e0b" data-color="#f59e0b"></div>
-                <div class="color-dot" style="background:#10b981" data-color="#10b981"></div>
-                <div class="color-dot" style="background:#06b6d4" data-color="#06b6d4"></div>
-                <div class="color-dot" style="background:#0f172a" data-color="#0f172a"></div>
+            <div class="color-row">
+                <input type="color" id="colorInput" value="#3b82f6">
+                <div class="color-preview" id="colorPreview" style="background:#3b82f6"></div>
+                <span id="colorCode" style="font-family:monospace;font-size:0.85rem;color:#64748b">#3b82f6</span>
             </div>
         </div>
         
@@ -211,25 +257,22 @@ app.get('/', (req, res) => {
         </div>
         
         <div class="saved-list" id="savedList">
-            <h3>📜 Saved Portfolios</h3>
+            <h3>📜 Recent Portfolios</h3>
             <div id="savedItems" style="color:#94a3b8;font-size:0.85rem;">Loading...</div>
         </div>
     </div>
     
     <script>
-        var selectedColor = '#3b82f6';
         var portfolioUrl = '';
         
-        // Color picker
-        document.getElementById('colorPicker').onclick = function(e) {
-            if (e.target.classList.contains('color-dot')) {
-                var dots = document.querySelectorAll('.color-dot');
-                for (var i = 0; i < dots.length; i++) {
-                    dots[i].classList.remove('active');
-                }
-                e.target.classList.add('active');
-                selectedColor = e.target.getAttribute('data-color');
-            }
+        // Color picker - live preview
+        var colorInput = document.getElementById('colorInput');
+        var colorPreview = document.getElementById('colorPreview');
+        var colorCode = document.getElementById('colorCode');
+        
+        colorInput.oninput = function() {
+            colorPreview.style.background = this.value;
+            colorCode.textContent = this.value;
         };
         
         // Load saved profiles
@@ -249,7 +292,7 @@ app.get('/', (req, res) => {
                 for (var i = 0; i < data.profiles.length; i++) {
                     var p = data.profiles[i];
                     html += '<div class="saved-item">' +
-                        '<a href="/p/' + p.id + '" target="_blank">' + p.name + '</a>' +
+                        '<a href="/p/' + p.id + '" target="_blank">👤 ' + p.name + '</a>' +
                         '<span>👁 ' + p.views + ' views</span>' +
                     '</div>';
                 }
@@ -262,6 +305,7 @@ app.get('/', (req, res) => {
             var age = document.getElementById('ageInput').value.trim();
             var bio = document.getElementById('bioInput').value.trim();
             var url = document.getElementById('urlInput').value.trim();
+            var color = document.getElementById('colorInput').value;
             
             if (!name) {
                 alert('Please enter your name!');
@@ -280,7 +324,7 @@ app.get('/', (req, res) => {
                     age: age,
                     bio: bio,
                     url: url,
-                    color: selectedColor
+                    color: color
                 })
             })
             .then(function(res) { return res.json(); })
@@ -292,13 +336,11 @@ app.get('/', (req, res) => {
                     link.textContent = data.url;
                     document.getElementById('result').style.display = 'block';
                     
-                    // Clear form
                     document.getElementById('nameInput').value = '';
                     document.getElementById('ageInput').value = '';
                     document.getElementById('bioInput').value = '';
                     document.getElementById('urlInput').value = '';
                     
-                    // Refresh saved list
                     loadSavedProfiles();
                 } else {
                     alert('Error: ' + data.error);
@@ -330,7 +372,8 @@ app.get('/', (req, res) => {
     `);
 });
 
-// ==================== API: CREATE PORTFOLIO ====================
+// ==================== API ENDPOINTS ====================
+
 app.post('/create', (req, res) => {
     const { name, age, bio, url, color } = req.body;
     
@@ -351,28 +394,29 @@ app.post('/create', (req, res) => {
         views: 0
     };
     
-    // Save to database
-    saveProfile(profile);
+    const saved = saveProfile(profile);
+    
+    if (!saved) {
+        return res.json({ success: false, error: 'Failed to save to database' });
+    }
     
     const portfolioUrl = `${req.protocol}://${req.get('host')}/p/${id}`;
     
-    console.log('✅ Portfolio saved:', portfolioUrl);
+    console.log('✅ Portfolio created:', portfolioUrl);
+    console.log('📊 Total profiles:', getAllProfiles().length);
     
     res.json({ success: true, url: portfolioUrl, id });
 });
 
-// ==================== API: GET ALL PROFILES ====================
 app.get('/api/profiles', (req, res) => {
     const profiles = getAllProfiles();
-    // Return last 10, newest first
     const sorted = profiles
         .sort((a, b) => new Date(b.created) - new Date(a.created))
         .slice(0, 10);
     
-    res.json({ success: true, profiles: sorted });
+    res.json({ success: true, profiles: sorted, total: profiles.length });
 });
 
-// ==================== API: GET SINGLE PROFILE ====================
 app.get('/api/profile/:id', (req, res) => {
     const profile = findProfile(req.params.id);
     
@@ -383,47 +427,22 @@ app.get('/api/profile/:id', (req, res) => {
     res.json({ success: true, profile });
 });
 
-// ==================== VIEW PORTFOLIO PAGE ====================
+// ==================== VIEW PORTFOLIO ====================
 app.get('/p/:id', (req, res) => {
     const { id } = req.params;
     const profile = findProfile(id);
     
     if (!profile) {
         return res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Not Found</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <style>
-                    body{
-                        font-family:sans-serif;
-                        display:flex;
-                        align-items:center;
-                        justify-content:center;
-                        min-height:100vh;
-                        background:#0f172a;
-                        color:white;
-                        text-align:center;
-                    }
-                    a{color:#3b82f6}
-                </style>
-            </head>
-            <body>
-                <div>
-                    <h1>🔍 Portfolio Not Found</h1>
-                    <p>This link doesn't exist.</p>
-                    <a href="/">Create Your Portfolio →</a>
-                </div>
-            </body>
-            </html>
+            <!DOCTYPE html><html><head><title>Not Found</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;color:white;text-align:center}a{color:#3b82f6}</style>
+            </head><body><div><h1>🔍 Not Found</h1><p>Portfolio doesn't exist.</p><a href="/">Create Yours →</a></div></body></html>
         `);
     }
     
-    // Increment views in database
     incrementViews(id);
     const updatedProfile = findProfile(id);
-    
     const initial = profile.name.charAt(0).toUpperCase();
     
     res.send(`
@@ -479,54 +498,13 @@ app.get('/p/:id', (req, res) => {
                 border:4px solid white;
                 box-shadow:0 4px 15px rgba(0,0,0,0.2);
             }
-            h1{
-                font-size:1.5rem;
-                color:#0f172a;
-                margin-bottom:0.3rem;
-            }
-            .age{
-                display:inline-block;
-                background:#f1f5f9;
-                color:#64748b;
-                padding:0.3rem 1rem;
-                border-radius:2rem;
-                font-size:0.85rem;
-                margin-bottom:1rem;
-            }
-            .bio{
-                color:#475569;
-                line-height:1.6;
-                margin-bottom:1.5rem;
-                font-size:0.95rem;
-                padding:0 1rem;
-            }
-            .follow-btn{
-                display:inline-block;
-                padding:0.8rem 2.5rem;
-                background:${profile.color};
-                color:white;
-                text-decoration:none;
-                border-radius:2rem;
-                font-weight:600;
-                font-size:0.95rem;
-                transition:0.3s;
-            }
-            .follow-btn:hover{
-                transform:translateY(-2px);
-                box-shadow:0 10px 25px rgba(0,0,0,0.2);
-            }
-            .views{
-                margin-top:1rem;
-                color:#94a3b8;
-                font-size:0.8rem;
-            }
-            .create-link{
-                display:block;
-                margin-top:1rem;
-                color:#3b82f6;
-                text-decoration:none;
-                font-size:0.85rem;
-            }
+            h1{font-size:1.5rem;color:#0f172a;margin-bottom:0.3rem}
+            .age{display:inline-block;background:#f1f5f9;color:#64748b;padding:0.3rem 1rem;border-radius:2rem;font-size:0.85rem;margin-bottom:1rem}
+            .bio{color:#475569;line-height:1.6;margin-bottom:1.5rem;font-size:0.95rem;padding:0 1rem}
+            .follow-btn{display:inline-block;padding:0.8rem 2.5rem;background:${profile.color};color:white;text-decoration:none;border-radius:2rem;font-weight:600;font-size:0.95rem;transition:0.3s}
+            .follow-btn:hover{transform:translateY(-2px);box-shadow:0 10px 25px rgba(0,0,0,0.2)}
+            .views{margin-top:1rem;color:#94a3b8;font-size:0.8rem}
+            .create-link{display:block;margin-top:1rem;color:#3b82f6;text-decoration:none;font-size:0.85rem}
         </style>
     </head>
     <body>
@@ -536,7 +514,7 @@ app.get('/p/:id', (req, res) => {
             ${profile.age ? '<div class="age">🎂 ' + profile.age + ' years old</div>' : ''}
             ${profile.bio ? '<p class="bio">' + profile.bio + '</p>' : ''}
             ${profile.url ? '<a class="follow-btn" href="' + profile.url + '" target="_blank">🔗 Follow Me</a>' : ''}
-            <div class="views">👁️ ${updatedProfile.views} views</div>
+            <div class="views">👁️ ${updatedProfile ? updatedProfile.views : 0} views</div>
             <a class="create-link" href="/">⚡ Create Your Portfolio</a>
         </div>
     </body>
@@ -544,9 +522,10 @@ app.get('/p/:id', (req, res) => {
     `);
 });
 
-// ==================== START SERVER ====================
+// ==================== START ====================
 const PORT = process.env.PORT || 3230;
 app.listen(PORT, () => {
-    console.log('🎨 Portfolio Maker running on port ' + PORT);
-    console.log('💾 Database: ' + DB_FILE);
+    console.log('🎨 Portfolio Maker: http://localhost:' + PORT);
+    console.log('💾 Database:', DB_FILE);
+    console.log('📊 Existing profiles:', getAllProfiles().length);
 });
